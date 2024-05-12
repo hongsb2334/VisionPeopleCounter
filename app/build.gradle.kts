@@ -38,9 +38,13 @@ android {
     }
 
 }
-val cameraxVersion = "1.3.3" //버전 수정 필요할수 있음 1.1.0 -> 1.3.3
+val cameraxVersion = "1.3.3"
 dependencies {
-
+    implementation("org.tensorflow:tensorflow-lite:2.10.0")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.10.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.3.1")
+    implementation("com.google.mlkit:common:18.10.0")
+    implementation("com.google.mlkit:object-detection:17.0.1")
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
