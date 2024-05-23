@@ -40,9 +40,9 @@ import java.util.concurrent.Executors
 
 
 class ObjectDetectorHelper(
-    var threshold: Float = 0.5f,
+    var threshold: Float = 0.4f,
     var numThreads: Int = 2,
-    var maxResults: Int = 3,
+    var maxResults: Int = 20,
     var currentDelegate: Int = 0,
     var currentModel: Int = 0,
     val context: Context,
@@ -302,6 +302,9 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         Log.d(TAG, "onResults called with ${results?.size ?: 0} results")
         runOnUiThread {
             viewBinding.inferenceTimeVal.text = String.format("%d ms", inferenceTime)
+
+            val personCount = results?.size ?: 0
+            viewBinding.personCountVal.text = String.format("Person Count: %d", personCount)
             viewBinding.overlay.setResults(
                 results ?: LinkedList(),
                 imageHeight,
