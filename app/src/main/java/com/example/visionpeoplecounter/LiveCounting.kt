@@ -40,11 +40,11 @@ import java.util.concurrent.Executors
 class ObjectDetectorHelper(
     var threshold: Float = 0.1f,
     var numThreads: Int = 2,
-    var maxResults: Int = 5,
+    var maxResults: Int = 3,
     var currentDelegate: Int = 0,
     var currentModel: Int = 0,
     val context: Context,
-    val objectDetectorListener: LiveCounting
+    val objectDetectorListener: DetectorListener
 ) {
 
     // For this example this needs to be a var so it can be reset on changes. If the ObjectDetector
@@ -58,6 +58,8 @@ class ObjectDetectorHelper(
     fun clearObjectDetector() {
         objectDetector = null
     }
+
+
 
     // Initialize the object detector using current settings on the
     // thread that is using it. CPU and NNAPI delegates can be used with detectors
@@ -78,8 +80,7 @@ class ObjectDetectorHelper(
         val modelName = "mobilenetv1.tflite"
 
         try {
-            objectDetector =
-                ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())
+            objectDetector = ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())
         } catch (e: IllegalStateException) {
             objectDetectorListener.onError(
                 "Object detector failed to initialize. See error logs for details"
@@ -225,15 +226,16 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
                     }
                 }
             // Unbind use cases before rebinding
-            cameraProvider?.unbindAll()
 
+            cameraProvider?.unbindAll()
             try {
                 // Bind use cases to camera
+
                 camera = cameraProvider?.bindToLifecycle(
                     this, cameraSelector, preview, imageAnalyzer)
                 // Attach the viewfinder's surface provider to preview use case
 
-                preview?.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
@@ -246,7 +248,7 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         val bitmap = imageProxyToBitmap(image)
         Log.d(TAG, "Detecting objects with rotation: $rotationDegrees")
         objectDetectorHelper.detect(bitmap, rotationDegrees)
-
+        image.close()
     }
 
     private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
@@ -281,7 +283,7 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         imageHeight: Int,
         imageWidth: Int
     ) {
-        Log.d(TAG, "onResults called with $results")
+        Log.d(TAG, "onResults called with ${results?.size ?: 0} results")
         runOnUiThread {
             viewBinding.inferenceTimeVal.text = String.format("%d ms", inferenceTime)
             viewBinding.overlay.setResults(

@@ -32,7 +32,7 @@ import kotlin.math.max
 
 class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs) {
 
-    private var results: List<Detection> = LinkedList<Detection>()
+    private var results: List<Detection> = emptyList()
     private var boxPaint = Paint()
     private var textBackgroundPaint = Paint()
     private var textPaint = Paint()
@@ -69,7 +69,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        Log.d(TAG, "OverlayView onDraw called")
+        Log.d(TAG, "OverlayView onDraw called with ${results.size} results")
         for (result in results) {
             val boundingBox = result.boundingBox
 
@@ -111,12 +111,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
         imageHeight: Int,
         imageWidth: Int,
     ) {
-        Log.d(TAG, "OverlayView setResults called with $detectionResults")
+        Log.d(TAG, "OverlayView setResults called with ${detectionResults.size} results")
         results = detectionResults
 
         // PreviewView is in FILL_START mode. So we need to scale up the bounding box to match with
         // the size that the captured images will be displayed.
         scaleFactor = max(width * 1f / imageWidth, height * 1f / imageHeight)
+        Log.d(TAG, "OverlayView scaleFactor set to $scaleFactor")
         invalidate()
     }
 
