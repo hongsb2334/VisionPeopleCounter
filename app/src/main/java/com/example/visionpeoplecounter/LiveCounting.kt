@@ -21,12 +21,14 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.visionpeoplecounter.databinding.ActivityLiveCountingBinding
+import com.google.android.gms.tflite.client.TfLiteInitializationOptions
 import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
 import org.tensorflow.lite.support.image.ops.Rot90Op
 import org.tensorflow.lite.task.core.BaseOptions
+import org.tensorflow.lite.task.gms.vision.TfLiteVision
 import org.tensorflow.lite.task.vision.detector.Detection
 import org.tensorflow.lite.task.vision.detector.ObjectDetector
 import java.nio.ByteBuffer
@@ -38,7 +40,7 @@ import java.util.concurrent.Executors
 
 
 class ObjectDetectorHelper(
-    var threshold: Float = 0.1f,
+    var threshold: Float = 0.5f,
     var numThreads: Int = 2,
     var maxResults: Int = 3,
     var currentDelegate: Int = 0,
@@ -47,11 +49,16 @@ class ObjectDetectorHelper(
     val objectDetectorListener: DetectorListener
 ) {
 
+    private val TAG = "ObjectDetectionHelper"
     // For this example this needs to be a var so it can be reset on changes. If the ObjectDetector
     // will not change, a lazy val would be preferable.
     private var objectDetector: ObjectDetector? = null
 
+
     init {
+        if (!TfLiteVision.isInitialized()) {
+            TfLiteVision.initialize(context, TfLiteInitializationOptions.builder().build())
+        }
         setupObjectDetector()
     }
 
@@ -65,17 +72,17 @@ class ObjectDetectorHelper(
     // thread that is using it. CPU and NNAPI delegates can be used with detectors
     // that are created on the main thread and used on a background thread, but
     // the GPU delegate needs to be used on the thread that initialized the detector
-    private fun setupObjectDetector() {
+    fun setupObjectDetector() {
         // Create the base options for the detector using specifies max results and score threshold
         val optionsBuilder =
             ObjectDetector.ObjectDetectorOptions.builder()
                 .setScoreThreshold(threshold)
                 .setMaxResults(maxResults)
-                .setBaseOptions(BaseOptions.builder()
-                    .setNumThreads(numThreads)
-                    .build()
-                )
 
+
+        val baseOptionsBuilder = BaseOptions.builder().setNumThreads(numThreads)
+
+        optionsBuilder.setBaseOptions(baseOptionsBuilder.build())
         // Use the specified hardware for running the model. Default to CPU
         val modelName = "mobilenetv1.tflite"
 
@@ -90,6 +97,11 @@ class ObjectDetectorHelper(
     }
 
     fun detect(image: Bitmap, imageRotation: Int) {
+        if (!TfLiteVision.isInitialized()) {
+            Log.e(TAG, "detect: TfLiteVision is not initialized yet")
+            return
+        }
+
         if (objectDetector == null) {
             setupObjectDetector()
         }
@@ -99,7 +111,7 @@ class ObjectDetectorHelper(
         val imageProcessor = ImageProcessor.Builder()
             /*.add(ResizeOp(640, 640, ResizeOp.ResizeMethod.BILINEAR))*/
             .add(Rot90Op(-imageRotation / 90))
-            .add(NormalizeOp(127.5f, 127.5f))    // 추가: 정규화 작업
+               // 추가: 정규화 작업
             .build()
 
         val tensorImage = imageProcessor.process(TensorImage.fromBitmap(image))
@@ -114,6 +126,7 @@ class ObjectDetectorHelper(
     }
 
     interface DetectorListener {
+        fun onInitialized()
         fun onError(error: String)
         fun onResults(
             results: MutableList<Detection>?,
@@ -303,6 +316,19 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         }
     }
 
+
+    override fun onInitialized() {
+        objectDetectorHelper.setupObjectDetector()
+
+        // Initialize our background executor
+        cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Wait for the views to be properly laid out
+        viewBinding.viewFinder.post {
+            // Set up the camera and its use cases
+            startCamera()
+        }
+    }
     companion object {
         private const val TAG = "CameraXApp"
         private const val REQUEST_CODE_PERMISSIONS = 10
