@@ -117,9 +117,12 @@ class ObjectDetectorHelper(
         val tensorImage = imageProcessor.process(TensorImage.fromBitmap(image))
 
         val results = objectDetector?.detect(tensorImage)
+        val personResults = results?.filter { detection ->
+            detection.categories.any { category -> category.label == "person" }
+        }?.toMutableList()
         inferenceTime = SystemClock.uptimeMillis() - inferenceTime
         objectDetectorListener.onResults(
-            results,
+            personResults,
             inferenceTime,
             tensorImage.height,
             tensorImage.width)
