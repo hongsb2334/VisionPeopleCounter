@@ -38,13 +38,11 @@ android {
     }
 
 }
-val cameraxVersion = "1.3.3"
 dependencies {
+    implementation("com.google.guava:guava:30.1.1-android")
     implementation("org.tensorflow:tensorflow-lite:2.10.0")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.10.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.3.1")
-    implementation("com.google.mlkit:common:18.10.0")
-    implementation("com.google.mlkit:object-detection:17.0.1")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.0")
+    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.0")
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)

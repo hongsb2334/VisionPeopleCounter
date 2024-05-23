@@ -1,28 +1,19 @@
 package com.example.visionpeoplecounter
 
+
 import android.Manifest
-import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.pm.PackageManager
-import android.content.res.AssetFileDescriptor
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.RectF
-import android.media.Image
 import android.os.Build
 import android.os.Bundle
-import android.util.AttributeSet
+import android.os.SystemClock
 import android.util.Log
-import android.view.View
 import android.widget.Toast
-import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.AspectRatio
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -30,97 +21,141 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.visionpeoplecounter.databinding.ActivityLiveCountingBinding
-import org.tensorflow.lite.Interpreter
-import java.io.FileInputStream
-import java.io.IOException
+import org.tensorflow.lite.support.common.ops.NormalizeOp
+import org.tensorflow.lite.support.image.ImageProcessor
+import org.tensorflow.lite.support.image.TensorImage
+import org.tensorflow.lite.support.image.ops.ResizeOp
+import org.tensorflow.lite.support.image.ops.Rot90Op
+import org.tensorflow.lite.task.core.BaseOptions
+import org.tensorflow.lite.task.vision.detector.Detection
+import org.tensorflow.lite.task.vision.detector.ObjectDetector
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
+import java.util.LinkedList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-object ImageUtils {
-    fun imageToBitmap(image: Image, rotationDegrees: Int): Bitmap {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.capacity()).apply { buffer.get(this) }
-        val options = BitmapFactory.Options().apply {
-            inMutable = true
-        }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        if (bitmap == null) {
-            Log.e(TAG, "Unable to decode the ByteArray into a Bitmap.")
-            throw IllegalStateException("Unable to decode the ByteArray into a Bitmap.")
-        }
 
 
-        val matrix = Matrix().apply {
-            postRotate(rotationDegrees.toFloat())
-        }
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+
+class ObjectDetectorHelper(
+    var threshold: Float = 0.1f,
+    var numThreads: Int = 2,
+    var maxResults: Int = 5,
+    var currentDelegate: Int = 0,
+    var currentModel: Int = 0,
+    val context: Context,
+    val objectDetectorListener: LiveCounting
+) {
+
+    // For this example this needs to be a var so it can be reset on changes. If the ObjectDetector
+    // will not change, a lazy val would be preferable.
+    private var objectDetector: ObjectDetector? = null
+
+    init {
+        setupObjectDetector()
     }
 
-    fun bitmapToByteBuffer(bitmap: Bitmap, width: Int, height: Int): ByteBuffer {
-        val byteBuffer = ByteBuffer.allocateDirect(4 * width * height * 3)
-        byteBuffer.order(ByteOrder.nativeOrder())
-        val intValues = IntArray(width * height)
-        bitmap.getPixels(intValues, 0, bitmap.width, 0, 0, width, height)
-        intValues.forEach { value ->
-            byteBuffer.putFloat(((value shr 16 and 0xFF) - 128f) / 128f)
-            byteBuffer.putFloat(((value shr 8 and 0xFF) - 128f) / 128f)
-            byteBuffer.putFloat(((value and 0xFF) - 128f) / 128f)
+    fun clearObjectDetector() {
+        objectDetector = null
+    }
+
+    // Initialize the object detector using current settings on the
+    // thread that is using it. CPU and NNAPI delegates can be used with detectors
+    // that are created on the main thread and used on a background thread, but
+    // the GPU delegate needs to be used on the thread that initialized the detector
+    private fun setupObjectDetector() {
+        // Create the base options for the detector using specifies max results and score threshold
+        val optionsBuilder =
+            ObjectDetector.ObjectDetectorOptions.builder()
+                .setScoreThreshold(threshold)
+                .setMaxResults(maxResults)
+                .setBaseOptions(BaseOptions.builder()
+                    .setNumThreads(numThreads)
+                    .build()
+                )
+
+        // Use the specified hardware for running the model. Default to CPU
+        val modelName = "mobilenetv1.tflite"
+
+        try {
+            objectDetector =
+                ObjectDetector.createFromFileAndOptions(context, modelName, optionsBuilder.build())
+        } catch (e: IllegalStateException) {
+            objectDetectorListener.onError(
+                "Object detector failed to initialize. See error logs for details"
+            )
+            Log.e("Test", "TFLite failed to load model with error: " + e.message)
         }
-        return byteBuffer
-    }
-}
-
-data class Detection(val box: RectF, val score: Float)
-
-class OverlayView(context: Context, attrs: AttributeSet) : View(context, attrs) {
-    private val paint = Paint().apply {
-        color = Color.RED
-        style = Paint.Style.STROKE
-        strokeWidth = 8f
     }
 
-    private val detections = mutableListOf<Detection>()
+    fun detect(image: Bitmap, imageRotation: Int) {
+        if (objectDetector == null) {
+            setupObjectDetector()
+        }
 
-    fun clear() {
-        detections.clear()
+        var inferenceTime = SystemClock.uptimeMillis()
+
+        val imageProcessor = ImageProcessor.Builder()
+            /*.add(ResizeOp(640, 640, ResizeOp.ResizeMethod.BILINEAR))*/
+            .add(Rot90Op(-imageRotation / 90))
+            .add(NormalizeOp(127.5f, 127.5f))    // 추가: 정규화 작업
+            .build()
+
+        val tensorImage = imageProcessor.process(TensorImage.fromBitmap(image))
+
+        val results = objectDetector?.detect(tensorImage)
+        inferenceTime = SystemClock.uptimeMillis() - inferenceTime
+        objectDetectorListener.onResults(
+            results,
+            inferenceTime,
+            tensorImage.height,
+            tensorImage.width)
     }
 
-    fun addBox(rect: RectF, imageWidth: Int, imageHeight: Int) {
-        val scaleX = width.toFloat() / imageWidth
-        val scaleY = height.toFloat() / imageHeight
-        val scaledRect = RectF(
-            rect.left * scaleX, rect.top * scaleY,
-            rect.right * scaleX, rect.bottom * scaleY
+    interface DetectorListener {
+        fun onError(error: String)
+        fun onResults(
+            results: MutableList<Detection>?,
+            inferenceTime: Long,
+            imageHeight: Int,
+            imageWidth: Int
         )
-        detections.add(Detection(scaledRect, 1.0f))
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        detections.forEach {
-            canvas.drawRect(it.box, paint)
-        }
+    companion object {
+        const val DELEGATE_CPU = 0
+        const val DELEGATE_GPU = 1
+        const val DELEGATE_NNAPI = 2
+        const val MODEL_MOBILENETV1 = 0
+        const val MODEL_EFFICIENTDETV0 = 1
+        const val MODEL_EFFICIENTDETV1 = 2
+        const val MODEL_EFFICIENTDETV2 = 3
     }
 }
 
 
-
-class LiveCounting : AppCompatActivity() {
+class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
 
     private lateinit var viewBinding: ActivityLiveCountingBinding
     private lateinit var cameraExecutor: ExecutorService
-    private lateinit var tflite: Interpreter
+    private lateinit var objectDetectorHelper: ObjectDetectorHelper
+    private lateinit var bitmapBuffer: Bitmap
+    private var preview: Preview? = null
+    private var imageAnalyzer: ImageAnalysis? = null
+    private var camera: Camera? = null
+    private var cameraProvider: ProcessCameraProvider? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "onCreate called")
         viewBinding = ActivityLiveCountingBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
-        // Request camera permissions
+        objectDetectorHelper = ObjectDetectorHelper(
+            context = this,
+            objectDetectorListener = this
+        )
+
         if (allPermissionsGranted()) {
             startCamera()
         } else {
@@ -128,13 +163,12 @@ class LiveCounting : AppCompatActivity() {
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
-
         cameraExecutor = Executors.newSingleThreadExecutor()
-
     }
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults:
         IntArray) {
+        Log.d(TAG, "onRequestPermissionsResult called")
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
@@ -150,15 +184,18 @@ class LiveCounting : AppCompatActivity() {
 
 
     private fun startCamera() {
+        Log.d(TAG, "startCamera called")
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener({
             // Used to bind the lifecycle of cameras to the lifecycle owner
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+            cameraProvider = cameraProviderFuture.get()
 
 
             // Preview
-            val preview = Preview.Builder()
+            preview = Preview.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .setTargetRotation(viewBinding.viewFinder.display.rotation)
                 .build()
                 .also {
                     it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
@@ -167,25 +204,36 @@ class LiveCounting : AppCompatActivity() {
             // Select back camera as a default
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-            val imageAnalysis = ImageAnalysis.Builder()
-                //.setTargetResolution(Size(1280, 720))
+            imageAnalyzer = ImageAnalysis.Builder()
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                .setTargetRotation(viewBinding.viewFinder.display.rotation)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
                 .also {
-                    it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { imageProxy ->
-                        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-                        processImage(imageProxy)
-                        imageProxy.close()
-                    })
+                    it.setAnalyzer(cameraExecutor) { image ->
+                        Log.d(TAG, "imageAnalyzer setAnalyzer called")
+                        if (!::bitmapBuffer.isInitialized) {
+                            bitmapBuffer = Bitmap.createBitmap(
+                                image.width,
+                                image.height,
+                                Bitmap.Config.ARGB_8888
+                            )
+                        }
+                        detectObjects(image)
+
+                    }
                 }
+            // Unbind use cases before rebinding
+            cameraProvider?.unbindAll()
+
             try {
-                // Unbind use cases before rebinding
-                cameraProvider.unbindAll()
-
                 // Bind use cases to camera
-                cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageAnalysis)
+                camera = cameraProvider?.bindToLifecycle(
+                    this, cameraSelector, preview, imageAnalyzer)
+                // Attach the viewfinder's surface provider to preview use case
 
+                preview?.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
@@ -193,80 +241,26 @@ class LiveCounting : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun detectObjects(image: ImageProxy) {
+        val rotationDegrees = image.imageInfo.rotationDegrees
+        val bitmap = imageProxyToBitmap(image)
+        Log.d(TAG, "Detecting objects with rotation: $rotationDegrees")
+        objectDetectorHelper.detect(bitmap, rotationDegrees)
 
-    private fun processImage(imageProxy: ImageProxy) {
-        @OptIn(ExperimentalGetImage::class)
-        val image = imageProxy.image
-        if (image == null) {
-            Log.d(TAG, "ImageProxy does not contain an image.")
-            imageProxy.close()
-            return
-        }
-        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-        val inputImage = ImageUtils.imageToBitmap(image, rotationDegrees)
-
-        // 이미지 전처리
-        val scaledBitmap = Bitmap.createScaledBitmap(inputImage, 640, 640, false)
-        val inputTensor = ImageUtils.bitmapToByteBuffer(scaledBitmap, 640, 640)
-
-        // 모델 실행
-        val outputMap = mutableMapOf<Int, Any>()
-        val outputLocations = Array(1) { Array(10) { FloatArray(4) } }  // 바운딩 박스 위치
-        val outputClasses = Array(1) { FloatArray(10) }  // 클래스 레이블
-        val outputScores = Array(1) { FloatArray(10) }  // 신뢰도 점수
-        val numDetections = FloatArray(1)  // 감지된 객체 수
-
-        outputMap[0] = outputLocations
-        outputMap[1] = outputClasses
-        outputMap[2] = outputScores
-        outputMap[3] = numDetections
-
-        tflite.runForMultipleInputsOutputs(arrayOf(inputTensor), outputMap)
-
-        // 결과 후처리
-        val persons = processDetections(outputLocations, outputClasses, outputScores, numDetections)
-
-        // UI 업데이트
-        updateOverlay(persons, imageProxy.width, imageProxy.height)
-
-        imageProxy.close()
     }
 
-    private fun processDetections(
-        locations: Array<Array<FloatArray>>,
-        classes: Array<FloatArray>,
-        scores: Array<FloatArray>,
-        numDetections: FloatArray
-    ): List<Detection> {
-        val detections = mutableListOf<Detection>()
-        for (i in 0 until numDetections[0].toInt()) {
-            if (scores[0][i] > 0.1 && classes[0][i].toInt() == 1) {
-                val box = locations[0][i]
-                val detection = Detection(
-                    RectF(
-                        box[1], // left
-                        box[0], // top
-                        box[3], // right
-                        box[2]  // bottom
-                    ),
-                    scores[0][i]
-                )
-                detections.add(detection)
-            }
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
+        Log.d(TAG, "imageProxyToBitmap called")
+        val buffer: ByteBuffer = image.planes[0].buffer
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        return Bitmap.createBitmap(
+            image.width, image.height, Bitmap.Config.ARGB_8888
+        ).also { bitmap ->
+            bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes))
         }
-        return detections
     }
 
-    private fun updateOverlay(detections: List<Detection>, imageWidth: Int, imageHeight: Int) {
-        // UI 쓰레드에서 뷰를 업데이트하도록 구현
-        runOnUiThread {
-            viewBinding.overlay.clear()
-            detections.forEach { detection ->
-                viewBinding.overlay.addBox(detection.box, imageWidth, imageHeight)
-            }
-            viewBinding.overlay.invalidate()
-        }
-    }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
@@ -275,24 +269,35 @@ class LiveCounting : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy called")
         cameraExecutor.shutdown()
+        cameraProvider?.unbindAll()
+        imageAnalyzer?.clearAnalyzer()
     }
 
-    private fun initTFLiteModel() {
-        try {
-            val assetModel = "yolov8n_int8.tflite"
-            val fileDescriptor: AssetFileDescriptor = assets.openFd(assetModel)
-            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-            val fileChannel = inputStream.channel
-            val startOffset = fileDescriptor.startOffset
-            val declaredLength = fileDescriptor.declaredLength
-            val tfliteModel: MappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    override fun onResults(
+        results: MutableList<Detection>?,
+        inferenceTime: Long,
+        imageHeight: Int,
+        imageWidth: Int
+    ) {
+        Log.d(TAG, "onResults called with $results")
+        runOnUiThread {
+            viewBinding.inferenceTimeVal.text = String.format("%d ms", inferenceTime)
+            viewBinding.overlay.setResults(
+                results ?: LinkedList(),
+                imageHeight,
+                imageWidth
+            )
+            viewBinding.overlay.invalidate()
+            Log.d(TAG, "overlayview update with $results")
+        }
+    }
 
-            val tfliteOptions = Interpreter.Options()
-            tfliteOptions.setNumThreads(4) // 필요에 따라 스레드 수 증가
-            tflite = Interpreter(tfliteModel, tfliteOptions)
-        } catch (e: IOException) {
-            Log.e(TAG, "모델 로드 실패", e)
+    override fun onError(error: String) {
+        Log.d(TAG, "onError called with $error")
+        runOnUiThread {
+            Toast.makeText(this, error, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -309,5 +314,7 @@ class LiveCounting : AppCompatActivity() {
                 }
             }.toTypedArray()
     }
+
+
 
 }
