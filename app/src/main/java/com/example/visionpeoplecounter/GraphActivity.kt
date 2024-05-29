@@ -6,9 +6,11 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.formatter.IndexAxisValueFormatter
 import com.google.android.material.button.MaterialButton
 
 class GraphActivity : AppCompatActivity() {
@@ -35,7 +37,7 @@ class GraphActivity : AppCompatActivity() {
 
     private fun displayGraph() {
         val counts = dbHelper.getAllCounts()
-        val entries = counts.mapIndexed { index, count -> Entry(index.toFloat(), count.toFloat()) }
+        val entries = counts.mapIndexed { index, (count,timestamp) -> Entry(index.toFloat(), count.toFloat()) }
 
         val dataSet = LineDataSet(entries, "Person Count").apply{
             color = Color.WHITE // 라인 색상
@@ -53,6 +55,12 @@ class GraphActivity : AppCompatActivity() {
             description.textColor = Color.WHITE // 설명 텍스트 색상
             description.isEnabled = false // 설명 텍스트 비활성화
             setDrawGridBackground(false) // 그리드 배경 비활성화
+            xAxis.position = XAxis.XAxisPosition.BOTTOM
+            xAxis.setDrawGridLines(false)
+            xAxis.setLabelCount(counts.size, true)
+            xAxis.valueFormatter = IndexAxisValueFormatter(counts.map { it.second })
+
+            setExtraOffsets(10f, 10f, 10f, 10f)
             invalidate() // 차트 새로고침
         }
     }

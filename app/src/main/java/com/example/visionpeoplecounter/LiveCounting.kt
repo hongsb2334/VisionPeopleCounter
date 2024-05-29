@@ -41,6 +41,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import com.example.visionpeoplecounter.ObjectDetectorHelper
 import com.github.mikephil.charting.data.Entry
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
 
@@ -53,9 +56,10 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var dbHelper: DatabaseHelper
-    private lateinit var periodicHandler: Handler
-    private lateinit var periodicRunnable: Runnable
     private var totalPersonCount: Int = 0
+    private val handler = Handler(Looper.getMainLooper())
+    private val interval: Long = 5000 // 5초
+    private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,12 +82,16 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
 
 
         cameraExecutor = Executors.newSingleThreadExecutor()
-        periodicHandler = Handler(Looper.getMainLooper())
-        periodicRunnable = Runnable {
-            // 주기적으로 수행할 작업을 여기에 작성
-            periodicHandler.postDelayed(periodicRunnable, 1000) // 1초마다 실행
-        }
-        periodicHandler.post(periodicRunnable)
+        handler.post(object : Runnable {
+            override fun run() {
+                saveData()
+                handler.postDelayed(this, interval)
+            }
+        })
+    }
+    private fun saveData() {
+        val timestamp = dateFormat.format(Date())
+        dbHelper.insertCount(totalPersonCount, timestamp)
     }
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults:
@@ -195,10 +203,8 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         cameraExecutor.shutdown()
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
-        if (::periodicHandler.isInitialized && ::periodicRunnable.isInitialized) {
-            periodicHandler.removeCallbacks(periodicRunnable)
-        }
-        dbHelper.insertCount(totalPersonCount)
+        handler.removeCallbacksAndMessages(null)
+
         val intent = Intent(this, GraphActivity::class.java)
         startActivity(intent)
     }

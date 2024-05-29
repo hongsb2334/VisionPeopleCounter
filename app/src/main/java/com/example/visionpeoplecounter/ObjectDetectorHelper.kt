@@ -5,8 +5,12 @@ import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
 import com.google.android.gms.tflite.client.TfLiteInitializationOptions
+import org.tensorflow.lite.DataType
+import org.tensorflow.lite.support.common.ops.NormalizeOp
+import org.tensorflow.lite.support.common.ops.QuantizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
+import org.tensorflow.lite.support.image.ops.ResizeOp
 import org.tensorflow.lite.support.image.ops.Rot90Op
 import org.tensorflow.lite.task.core.BaseOptions
 import org.tensorflow.lite.task.gms.vision.TfLiteVision
@@ -14,7 +18,7 @@ import org.tensorflow.lite.task.vision.detector.Detection
 import org.tensorflow.lite.task.vision.detector.ObjectDetector
 
 class ObjectDetectorHelper(
-    var threshold: Float = 0.4f,
+    var threshold: Float = 0.5f,
     var numThreads: Int = 2,
     var maxResults: Int = 20,
     var currentDelegate: Int = 0,
@@ -83,12 +87,14 @@ class ObjectDetectorHelper(
         var inferenceTime = SystemClock.uptimeMillis()
 
         val imageProcessor = ImageProcessor.Builder()
-            /*.add(ResizeOp(640, 640, ResizeOp.ResizeMethod.BILINEAR))*/
+            .add(ResizeOp(300, 300, ResizeOp.ResizeMethod.BILINEAR))
             .add(Rot90Op(-imageRotation / 90))
-            // 추가: 정규화 작업
+            /*.add(NormalizeOp(127.5f, 127.5f))// 추가: 정규화 작업
+            .add(QuantizeOp(0f, 255f))*/
             .build()
 
         val tensorImage = imageProcessor.process(TensorImage.fromBitmap(image))
+
 
         val results = objectDetector?.detect(tensorImage)
         val personResults = results?.filter { detection ->
