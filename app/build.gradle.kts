@@ -44,6 +44,7 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-support:0.4.0")
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.0")
     implementation("org.tensorflow:tensorflow-lite-task-vision-play-services:0.4.3")
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)

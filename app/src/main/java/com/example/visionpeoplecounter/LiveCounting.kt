@@ -1,12 +1,16 @@
 package com.example.visionpeoplecounter
 
 
+import DatabaseHelper
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
@@ -36,7 +40,7 @@ import java.util.LinkedList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import com.example.visionpeoplecounter.ObjectDetectorHelper
-
+import com.github.mikephil.charting.data.Entry
 
 class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
 
@@ -48,6 +52,10 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
     private var imageAnalyzer: ImageAnalysis? = null
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private lateinit var dbHelper: DatabaseHelper
+    private lateinit var periodicHandler: Handler
+    private lateinit var periodicRunnable: Runnable
+    private var totalPersonCount: Int = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +63,7 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         viewBinding = ActivityLiveCountingBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
+        dbHelper = DatabaseHelper(this)
         objectDetectorHelper = ObjectDetectorHelper(
             context = this,
             objectDetectorListener = this
@@ -67,7 +76,14 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
+
         cameraExecutor = Executors.newSingleThreadExecutor()
+        periodicHandler = Handler(Looper.getMainLooper())
+        periodicRunnable = Runnable {
+            // 주기적으로 수행할 작업을 여기에 작성
+            periodicHandler.postDelayed(periodicRunnable, 1000) // 1초마다 실행
+        }
+        periodicHandler.post(periodicRunnable)
     }
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults:
@@ -85,6 +101,7 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
             }
         }
     }
+
 
 
     private fun startCamera() {
@@ -178,6 +195,12 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
         cameraExecutor.shutdown()
         cameraProvider?.unbindAll()
         imageAnalyzer?.clearAnalyzer()
+        if (::periodicHandler.isInitialized && ::periodicRunnable.isInitialized) {
+            periodicHandler.removeCallbacks(periodicRunnable)
+        }
+        dbHelper.insertCount(totalPersonCount)
+        val intent = Intent(this, GraphActivity::class.java)
+        startActivity(intent)
     }
 
     override fun onResults(
@@ -199,6 +222,7 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
             )
             viewBinding.overlay.invalidate()
             Log.d(TAG, "overlayview update with $results")
+            totalPersonCount = personCount
         }
     }
 
@@ -222,6 +246,8 @@ class LiveCounting : AppCompatActivity(), ObjectDetectorHelper.DetectorListener{
             startCamera()
         }
     }
+
+
     companion object {
         private const val TAG = "CameraXApp"
         private const val REQUEST_CODE_PERMISSIONS = 10

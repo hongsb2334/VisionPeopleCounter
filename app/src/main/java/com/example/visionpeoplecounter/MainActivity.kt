@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             option3Button.setOnClickListener {
-                val intent = Intent(this@MainActivity, PersonData::class.java)
+                val intent = Intent(this@MainActivity, GraphActivity::class.java)
                 startActivity(intent)
             }
 

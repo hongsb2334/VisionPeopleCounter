@@ -21,6 +21,7 @@
         <activity
             android:name=".UploadVideo"
             android:exported="false" />
+        <activity android:name=".GraphActivity" />
         <activity
             android:name=".LiveCounting"
             android:exported="false" />
